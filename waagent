@@ -86,11 +86,12 @@ Children = []
 
 VMM_STARTUP_SCRIPT_NAME='install'
 VMM_CONFIG_FILE_NAME='linuxosconfiguration.xml'
-
+global RulesFiles
 RulesFiles = [ "/lib/udev/rules.d/75-persistent-net-generator.rules",
                "/etc/udev/rules.d/70-persistent-net.rules" ]
 VarLibDhcpDirectories = ["/var/lib/dhclient", "/var/lib/dhcpcd", "/var/lib/dhcp"]
 EtcDhcpClientConfFiles = ["/etc/dhcp/dhclient.conf", "/etc/dhcp3/dhclient.conf"]
+global LibDir
 LibDir = "/var/lib/waagent"
 
 ############################################################
@@ -1267,11 +1268,9 @@ class FreeBSDDistro(AbstractDistro):
             mountpoint = "/mnt/resource"
         CreateDir(mountpoint, "root", 0755)
         #TODO change default config file...
-        #fs = Config.get("ResourceDisk.Filesystem")
-        fs='freebsd-ufs'
-        Run("gpart modify -t freebsd-ufs -i 1 " + device)
-        Run("newfs -U /dev/gpt/resource")
-        if Run("mount " + device + "1 " + mountpoint):
+        fs = Config.get("ResourceDisk.Filesystem")
+        Run("newfs " + device + "s1")
+        if Run("mount " + device + "s1 " + mountpoint):
             Error("ActivateResourceDisk: Failed to mount resource disk (" + device + "1).")
             return
         Log("Resource disk (" + device + "1) is mounted at " + mountpoint + " with fstype " + fs)
@@ -1284,8 +1283,9 @@ class FreeBSDDistro(AbstractDistro):
             os.remove(mountpoint + "/swapfile")
         if not os.path.isfile(mountpoint + "/swapfile"):
             Run("dd if=/dev/zero of=" + mountpoint + "/swapfile bs=1024 count=" + str(sizeKB))
-            Run("mkswap " + mountpoint + "/swapfile")
-        if not Run("swapon " + mountpoint + "/swapfile"):
+        if Run("mdconfig -a -t vnode -f " + mountpoint + "/swapfile -u 0"):
+            Error("ActivateResourceDisk: Configuring swap - Failed to create md0")
+        if not Run("swapon /dev/md0"):
             Log("Enabled " + str(sizeKB) + " KB of swap at " + mountpoint + "/swapfile")
         else:
             Error("ActivateResourceDisk: Failed to activate swap at " + mountpoint + "/swapfile")
@@ -2072,7 +2072,6 @@ class EnvMonitor(object):
         Monitor dhcp client pid and hostname.
         If dchp clinet process re-start has occurred, reset routes, dhcp with fabric.
         """
-        global RulesFiles
         publish = ConfigurationProvider().get("Provisioning.MonitorHostName")
         dhcpcmd = MyDistro.getpidcmd+ ' ' + MyDistro.dhcp_client_name
         dhcppid = RunGetOutput(dhcpcmd)[1]
