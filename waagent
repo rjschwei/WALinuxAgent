@@ -94,6 +94,37 @@ EtcDhcpClientConfFiles = ["/etc/dhcp/dhclient.conf", "/etc/dhcp3/dhclient.conf"]
 global LibDir
 LibDir = "/var/lib/waagent"
 
+WaagentConf = """\
+#
+# Windows Azure Linux Agent Configuration
+#
+
+Role.StateConsumer=None                 # Specified program is invoked with "Ready" or "Shutdown".
+                                        # Shutdown will be initiated only after the program returns. Windows Azure will
+                                        # power off the VM if shutdown is not completed within ?? minutes.
+Role.ConfigurationConsumer=None         # Specified program is invoked with XML file argument specifying role configuration.
+Role.TopologyConsumer=None              # Specified program is invoked with XML file argument specifying role topology.
+
+Provisioning.Enabled=y                  #
+Provisioning.DeleteRootPassword=y       # Password authentication for root account will be unavailable.
+Provisioning.RegenerateSshHostKeyPair=y # Generate fresh host key pair.
+Provisioning.SshHostKeyPairType=rsa     # Supported values are "rsa", "dsa" and "ecdsa".
+Provisioning.MonitorHostName=y          # Monitor host name changes and publish changes via DHCP requests.
+
+ResourceDisk.Format=n                   # Format if unformatted. If 'n', resource disk will not be mounted.
+ResourceDisk.Filesystem=ext4            #
+ResourceDisk.MountPoint=/mnt/resource   #
+ResourceDisk.EnableSwap=n               # Create and use swapfile on resource disk.
+ResourceDisk.SwapSizeMB=0               # Size of the swapfile.
+
+LBProbeResponder=y                      # Respond to load balancer probes if requested by Windows Azure.
+
+Logs.Verbose=y                          #
+
+OS.RootDeviceScsiTimeout=300            # Root device timeout in seconds.
+OS.OpensslPath=None                     # If "None", the system default version is used.
+"""
+
 ############################################################
 # BEGIN DISTRO CLASS DEFS
 ############################################################
@@ -132,7 +163,8 @@ class AbstractDistro(object):
         self.getpidcmd = 'pidof'
         self.mount_dvd_cmd = 'mount'
         self.sudoers_dir_base = '/etc'
-        
+        self.waagent_conf_file = WaagentConf
+
     def isSelinuxSystem(self):
         """
         Checks and sets self.selinux = True if SELinux is available on system.
@@ -279,6 +311,9 @@ class AbstractDistro(object):
             Log("Root password deleted.")
         return 0
     
+    def changePass(self,user,password):
+        return RunSendStdin("chpasswd",(user + ":" + password + "\n"))
+    
     def load_ata_piix(self):
         """
         Generic function to load ata_piix.ko for use with ATAPI CDROM
@@ -368,7 +403,7 @@ class AbstractDistro(object):
         """
         if not os.path.exists(buildroot+'/etc'):
             os.mkdir(buildroot+'/etc')
-        SetFileContents(buildroot+'/etc/waagent.conf', WaagentConf)
+        SetFileContents(buildroot+'/etc/waagent.conf', MyDistro.waagent_conf_file)
         
         if not os.path.exists(buildroot+'/etc/logrotate.d'):
             os.mkdir(buildroot+'/etc/logrotate.d')
@@ -964,6 +999,36 @@ class LinuxMintDistro(UbuntuDistro):
 ############################################################    
 #	FreeBSD
 ############################################################    
+FreeBSDWaagentConf = """\
+#
+# Windows Azure Linux Agent Configuration
+#
+
+Role.StateConsumer=None                 # Specified program is invoked with "Ready" or "Shutdown".
+                                        # Shutdown will be initiated only after the program returns. Windows Azure will
+                                        # power off the VM if shutdown is not completed within ?? minutes.
+Role.ConfigurationConsumer=None         # Specified program is invoked with XML file argument specifying role configuration.
+Role.TopologyConsumer=None              # Specified program is invoked with XML file argument specifying role topology.
+
+Provisioning.Enabled=y                  #
+Provisioning.DeleteRootPassword=y       # Password authentication for root account will be unavailable.
+Provisioning.RegenerateSshHostKeyPair=y # Generate fresh host key pair.
+Provisioning.SshHostKeyPairType=rsa     # Supported values are "rsa", "dsa" and "ecdsa".
+Provisioning.MonitorHostName=y          # Monitor host name changes and publish changes via DHCP requests.
+
+ResourceDisk.Format=y                   # Format if unformatted. If 'n', resource disk will not be mounted.
+ResourceDisk.Filesystem=ufs2            #
+ResourceDisk.MountPoint=/mnt/resource   #
+ResourceDisk.EnableSwap=y               # Create and use swapfile on resource disk.
+ResourceDisk.SwapSizeMB=1024               # Size of the swapfile.
+
+LBProbeResponder=y                      # Respond to load balancer probes if requested by Windows Azure.
+
+Logs.Verbose=y                          #
+
+OS.RootDeviceScsiTimeout=300            # Root device timeout in seconds.
+OS.OpensslPath=None                     # If "None", the system default version is used.
+"""
 
 bsd_init_file="""\
 #! /bin/sh
@@ -975,13 +1040,13 @@ bsd_init_file="""\
 
 . /etc/rc.subr
 
-name=waagent 
-rcvar=waagent_enable
+name="waagent"
+rcvar="waagent_enable"
 command="/usr/sbin/${name}"
 command_interpreter="/usr/local/bin/python"
 waagent_flags=" daemon verbose &"
 
-pidfile="/var/run/${name}.pid"
+pidfile="/var/run/waagent.pid"
 
 load_rc_config $name
 run_rc_command "$1"
@@ -1003,7 +1068,7 @@ class FreeBSDDistro(AbstractDistro):
         self.hostname_file_path='/etc/hostname'
         self.dhcp_client_name='dhclient'
         self.requiredDeps = [ 'route', 'shutdown', 'ssh-keygen', 'pw'
-                              , 'openssl', 'fdisk', 'sed', 'grep' ] # TODO add sudo
+                              , 'openssl', 'fdisk', 'sed', 'grep' , 'sudo']
         self.init_script_file='/etc/rc.d/waagent'
         self.init_file=bsd_init_file
         self.agent_package_name='WALinuxAgent'
@@ -1014,7 +1079,8 @@ class FreeBSDDistro(AbstractDistro):
         self.getpidcmd = 'pgrep -n'
         self.mount_dvd_cmd = 'dd bs=2048 count=1 skip=295 if='
         self.sudoers_dir_base = '/usr/local/etc'
-
+        self.waagent_conf_file = FreeBSDWaagentConf
+        
     def installAgentServiceScriptFiles(self):
         SetFileContents(self.init_script_file, self.init_file)
         os.chmod(self.init_script_file, 0777)
@@ -1049,17 +1115,22 @@ class FreeBSDDistro(AbstractDistro):
 
     def deleteRootPassword(self):
         """
-        Generic root password removal.
+        BSD root password removal.
         """
-        filepath="/etc/passwd"
-        ReplaceFileContentsAtomic(filepath,"root:*LOCK*:14600::::::\n"
-                                  + "\n".join(filter(lambda a: not a.startswith("root:"),GetFileContents(filepath).split('\n'))))
+        filepath="/etc/master.passwd"
+        ReplaceStringInFile(filepath,r'root:.*?:','root::')
+        #ReplaceFileContentsAtomic(filepath,"root:*LOCK*:14600::::::\n"
+        #                          + "\n".join(filter(lambda a: not a.startswith("root:"),GetFileContents(filepath).split('\n'))))
         os.chmod(filepath, 0000)
         if self.isSelinuxSystem():
             self.setSelinuxContext(filepath,'chcon system_u:object_r:shadow_t:s0')
-            Log("Root password deleted.")
+        RunGetOutput("pwd_mkdb -u root /etc/master.passwd")
+        Log("Root password deleted.")
         return 0
 
+    def changePass(self,user,password):
+        return RunSendStdin("pw usermod " + user + " -h 0 ",password)
+    
     def load_ata_piix(self):
         return 0
 
@@ -1174,11 +1245,9 @@ class FreeBSDDistro(AbstractDistro):
                 return "Failed to create user account: " + user + " (0x07)."
             else:
                 Log("CreateAccount: " + user + " already exists. Will update password.")
-        # make the directory
-        CreateDir('/home/'+user,user,744)
         
         if password != None:
-            RunSendStdin("pw usermod " + user + " -h 0 ",password)
+            self.changePass(user,password)
         try:
             # for older distros create sudoers.d
             if not os.path.isdir(MyDistro.sudoers_dir_base+'/sudoers.d/'):
@@ -1235,7 +1304,7 @@ class FreeBSDDistro(AbstractDistro):
             Error("DeleteAccount: " + user + " is a system user. Will not delete account.")
             return
         Run("> /var/run/utmp") #Delete utmp to prevent error if we are the 'user' deleted
-        Run("userdel -f -r " + user)
+        Run("rmuser -y " + user)
         try:
             os.remove(MyDistro.sudoers_dir_base+"/sudoers.d/waagent")
         except:
@@ -1267,7 +1336,7 @@ class FreeBSDDistro(AbstractDistro):
         if mountpoint == None:
             mountpoint = "/mnt/resource"
         CreateDir(mountpoint, "root", 0755)
-        #TODO change default config file...
+        #TODO specialize default config file...
         fs = Config.get("ResourceDisk.Filesystem")
         Run("newfs " + device + "s1")
         if Run("mount " + device + "s1 " + mountpoint):
@@ -1322,7 +1391,7 @@ class FreeBSDDistro(AbstractDistro):
                 Warn("Existing /etc/waagent.conf has been renamed to /etc/waagent.conf.old")
             except:
                 pass
-        SetFileContents("/etc/waagent.conf", WaagentConf)
+        SetFileContents("/etc/waagent.conf", self.waagent_conf_file)
         if os.path.exists('/usr/local/etc/logrotate.d/'):
             SetFileContents("/usr/local/etc/logrotate.d/waagent", WaagentLogrotate)
         filepath = "/etc/ssh/sshd_config"
@@ -1343,7 +1412,7 @@ class FreeBSDDistro(AbstractDistro):
         return RunGetOutput(self.mount_dvd_cmd + dvd + ' of=' + location + '/ovf-env.xml')
 
     def GetHome(self):
-        return '/usr/home'
+        return '/home'
 
 ############################################################
 # END DISTRO CLASS DEFS
@@ -2789,10 +2858,8 @@ class OvfEnv(object):
                 (a.startswith("PasswordAuthentication") or a.startswith("ChallengeResponseAuthentication")),
                 GetFileContents(filepath).split('\n'))) + "PasswordAuthentication no\nChallengeResponseAuthentication no\n")
             Log("Disabled SSH password-based authentication methods.")
-        # TODO - specialize in MyDistro.
-        # TODO create MyDistro.changePass(user,password)
-        #if self.AdminPassword != None:
-        #    RunSendStdin("chpasswd",("root:" + self.AdminPassword + "\n"))
+        if self.AdminPassword != None:
+            MyDistro.changePass('root',self.AdminPassword)
         if self.UserName != None:
             error = MyDistro.CreateAccount(self.UserName, self.UserPassword, None, None)
         MyDistro.setSelinuxEnforce(0)
@@ -3481,8 +3548,7 @@ class Agent(Util):
         ReportReady if provisioning is complete.
         If provisioning failed, call ReportNotReady("ProvisioningFailed", provisionError)
         """
-        if IsLinux():
-            SetFileContents("/var/run/waagent.pid", str(os.getpid()) + "\n")
+        SetFileContents("/var/run/waagent.pid", str(os.getpid()) + "\n")
 
         # Determine if we are in VMM.  Spawn VMM_STARTUP_SCRIPT_NAME if found.
         self.SearchForVMMStartup()
@@ -3592,37 +3658,6 @@ class Agent(Util):
                 incarnation = self.ReportReady()                
             time.sleep(25 - sleepToReduceAccessDenied)
             
-WaagentConf = """\
-#
-# Windows Azure Linux Agent Configuration
-#
-
-Role.StateConsumer=None                 # Specified program is invoked with "Ready" or "Shutdown".
-                                        # Shutdown will be initiated only after the program returns. Windows Azure will
-                                        # power off the VM if shutdown is not completed within ?? minutes.
-Role.ConfigurationConsumer=None         # Specified program is invoked with XML file argument specifying role configuration.
-Role.TopologyConsumer=None              # Specified program is invoked with XML file argument specifying role topology.
-
-Provisioning.Enabled=y                  #
-Provisioning.DeleteRootPassword=n       # Password authentication for root account will be unavailable.
-Provisioning.RegenerateSshHostKeyPair=y # Generate fresh host key pair.
-Provisioning.SshHostKeyPairType=rsa     # Supported values are "rsa", "dsa" and "ecdsa".
-Provisioning.MonitorHostName=y          # Monitor host name changes and publish changes via DHCP requests.
-
-ResourceDisk.Format=n                   # Format if unformatted. If 'n', resource disk will not be mounted.
-ResourceDisk.Filesystem=ext4            #
-ResourceDisk.MountPoint=/mnt/resource   #
-ResourceDisk.EnableSwap=n               # Create and use swapfile on resource disk.
-ResourceDisk.SwapSizeMB=0               # Size of the swapfile.
-
-LBProbeResponder=y                      # Respond to load balancer probes if requested by Windows Azure.
-
-Logs.Verbose=y                          #
-
-OS.RootDeviceScsiTimeout=300            # Root device timeout in seconds.
-OS.OpensslPath=None                     # If "None", the system default version is used.
-"""
-
 WaagentLogrotate = """\
 /var/log/waagent.log {
     monthly
@@ -3742,7 +3777,7 @@ def Install():
             Warn("Existing /etc/waagent.conf has been renamed to /etc/waagent.conf.old")
         except:
             pass
-    SetFileContents("/etc/waagent.conf", WaagentConf)
+    SetFileContents("/etc/waagent.conf", MyDistro.waagent_conf_file)
     SetFileContents("/etc/logrotate.d/waagent", WaagentLogrotate)
     filepath = "/etc/ssh/sshd_config"
     ReplaceFileContentsAtomic(filepath, "\n".join(filter(lambda a: not
@@ -3940,6 +3975,7 @@ def main():
             Log("Linux Distribution Detected      : " + LinuxDistro)
         global WaAgent
         WaAgent = Agent()
+        
         WaAgent.Run()
     except Exception, e:
         Error(traceback.format_exc())
